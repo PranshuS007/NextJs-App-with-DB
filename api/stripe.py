@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from api.auth_pg import require_user
 from config.settings import settings
+from db import fetch_one
 
 try:
     import stripe as stripe_sdk
@@ -16,34 +18,24 @@ class CheckoutRequest(BaseModel):
     plan: str
 
 
-PRICE_PLANS = {
-    "drop-in": {
-        "name": "Drop-in Yoga Class",
-        "description": "One class at Still Studio",
-        "unit_amount": 2200,
-    },
-    "five-pack": {
-        "name": "5 Class Pack",
-        "description": "Five yoga classes, valid for three months",
-        "unit_amount": 9500,
-    },
-    "ten-pack": {
-        "name": "10 Class Pack",
-        "description": "Ten yoga classes, valid for six months",
-        "unit_amount": 17000,
-    },
-}
-
-
 @router.post("/checkout")
 async def create_checkout_session(payload: CheckoutRequest, request: Request):
+    require_user(request)
+
     if stripe_sdk is None:
         raise HTTPException(status_code=503, detail="Stripe is not installed on the server.")
 
     if not settings.stripe_secret_key:
         raise HTTPException(status_code=503, detail="Stripe checkout is not configured yet.")
 
-    plan = PRICE_PLANS.get(payload.plan)
+    plan = fetch_one(
+        """
+        SELECT name, description, unit_amount_cents, currency
+        FROM pricing_plans
+        WHERE slug = %(slug)s AND is_active = TRUE
+        """,
+        {"slug": payload.plan},
+    )
     if plan is None:
         raise HTTPException(status_code=400, detail="Unknown pricing option.")
 
@@ -56,12 +48,12 @@ async def create_checkout_session(payload: CheckoutRequest, request: Request):
             payment_method_types=["card"],
             line_items=[{
                 "price_data": {
-                    "currency": settings.stripe_currency,
+                    "currency": plan["currency"],
                     "product_data": {
                         "name": plan["name"],
                         "description": plan["description"],
                     },
-                    "unit_amount": plan["unit_amount"],
+                    "unit_amount": plan["unit_amount_cents"],
                 },
                 "quantity": 1,
             }],

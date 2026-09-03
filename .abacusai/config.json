@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pwd *)",
+      "Bash(Get-ChildItem -Path ./Uploads -Force)"
+    ]
+  }
+}
