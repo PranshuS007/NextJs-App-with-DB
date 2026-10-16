@@ -24,8 +24,22 @@ app.add_middleware(GZipMiddleware, minimum_size=500)
 @app.middleware("http")
 async def add_cache_headers(request: Request, call_next):
     response = await call_next(request)
+    # Static assets are not fingerprinted, so a year-long immutable cache would
+    # keep visitors (and local --reload developers) on stale CSS/JS for up to a
+    # year after any fix or deploy. Cache for an hour instead.
     if request.url.path.startswith("/static/"):
-        response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
+        response.headers.setdefault("Cache-Control", "public, max-age=3600")
+    return response
+
+
+@app.middleware("http")
+async def add_security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    if request.url.scheme == "https":
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
     return response
 
 

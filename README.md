@@ -28,9 +28,12 @@ SMTP_USERNAME=<your_smtp_username>
 SMTP_PASSWORD=<your_smtp_password>
 SMTP_USE_TLS=true
 EMAIL_FROM=<your_sender_email>
+COOKIE_SECURE=<optional: true/false, defaults to Secure only over HTTPS>
 ```
 
 **Important:** `DATABASE_URL` is required and must be set via environment variable or `.env` file. Do not hardcode credentials in the application.
+
+**Session cookie:** the auth cookie is marked `Secure` automatically when the site is served over HTTPS and left unmarked over plain HTTP (local dev, LAN). If TLS terminates at a reverse proxy, set `COOKIE_SECURE=true` so the app still marks it Secure.
 
 ## Security
 

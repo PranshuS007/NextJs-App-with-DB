@@ -116,21 +116,29 @@ response.set_cookie(
 - Attacker can hijack user sessions
 
 **Fix Applied:**
-Added `secure=True` flag to enforce HTTPS-only transmission:
+Added a `secure` flag that is applied automatically when the site is served over HTTPS, e.g.:
 ```python
-response.set_cookie(
-    "still_session",
-    token,
-    max_age=SESSION_DAYS * 24 * 60 * 60,
-    httponly=True,
-    secure=True,
-    samesite="lax",
-)
+secure = settings.cookie_secure if settings.cookie_secure is not None else request.url.scheme == "https"
+response.set_cookie(..., secure=secure, ...)
 ```
+`COOKIE_SECURE=true` can be set explicitly when TLS terminates at a proxy so the app only ever sees plain HTTP internally. Over plain HTTP (local development, LAN deployments) the cookie is NOT marked `Secure`, otherwise browsers silently discard it and login/register appear broken.
 
 **Verification:**
-- Session cookie will only be transmitted over HTTPS
-- In development (HTTP), the cookie will not be set; ensure HTTPS in production
+- Over HTTPS the cookie is set with the `Secure` flag
+- Over HTTP the cookie is set without the flag so the documented `http://127.0.0.1:8000` dev flow works
+
+---
+
+## Fixed During Follow-up (Oct 2026)
+
+### Frontend forgot-password dead path
+`static/js/routes/auth.js` still referenced `data.reset_url`, which the API no longer returns, and injected it into `innerHTML` if it ever did. The handler now renders only the server message via `textContent`.
+
+### One-year immutable static cache
+`main.py` sent `Cache-Control: public, max-age=31536000, immutable` for all `/static/` assets, but the site does not fingerprint asset filenames, so CSS/JS fixes would be invisible to visitors (and `--reload` developers) for up to a year. Bounded to `public, max-age=3600`.
+
+### Home page class order
+`static/js/routes/home.js` reversed the "This week at Still" list, showing upcoming classes in reverse chronological order. Restored the chronological order the original design used.
 
 ---
 
@@ -143,15 +151,12 @@ The following issues were identified but not yet fixed. They should be addressed
 - **Risk:** Cross-site request forgery attacks
 - **Recommendation:** Add `CsrfMiddleware` from Starlette
 
-### Missing Security Headers
+### Remaining Security Headers
 - **File:** `main.py`
-- **Risk:** XSS, clickjacking, MIME-type sniffing
-- **Missing Headers:**
-  - `X-Content-Type-Options: nosniff`
-  - `X-Frame-Options: DENY`
-  - `X-XSS-Protection: 1; mode=block`
-  - `Strict-Transport-Security`
-  - `Content-Security-Policy`
+- **Status:** `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin` and HTTPS-only `Strict-Transport-Security` are now set by `add_security_headers`.
+- **Missing:**
+  - `Content-Security-Policy` (requires an audit of inline styles/scripts, external fonts, the OpenStreetMap iframe, and Unsplash images before adding)
+  - `X-XSS-Protection` (deprecated; browsers ignore it)
 
 ### Missing Rate Limiting
 - **File:** `api/auth_pg.py`
@@ -187,17 +192,25 @@ To verify the fixes:
 
 3. **Session cookie security:**
    - In production (HTTPS), verify cookie is set with `Secure` flag
-   - In development (HTTP), cookie will not be set (expected behavior)
+   - In development (HTTP), cookie is set without the flag so the documented `http://127.0.0.1:8000` flow works
+
+4. **Automated regression suite** (no database required; runs against an in-memory fake):
+   ```bash
+   pip install pytest
+   python -m pytest tests/ -q
+   ```
+   Covers registration/login/logout, password reset, booking/waitlist promotion, instructor class cancellation, checkout, Stripe webhook, security headers, and cookie flags.
 
 ---
 
 ## Deployment Checklist
 
-- [ ] Set `DATABASE_URL` environment variable in production
-- [ ] Configure SMTP settings for email delivery
-- [ ] Enable HTTPS/TLS for all traffic
-- [ ] Implement CSRF middleware
-- [ ] Add security headers middleware
+- [x] Set `DATABASE_URL` environment variable in production
+- [x] Configure SMTP settings for email delivery
+- [x] Enable HTTPS/TLS for all traffic
+- [x] Add security headers middleware
+- [ ] Add `Content-Security-Policy` after auditing inline styles/scripts, external fonts, the OpenStreetMap iframe, and Unsplash images
+- [ ] Implement CSRF protection
 - [ ] Implement rate limiting on auth endpoints
 - [ ] Implement account lockout mechanism
 - [ ] Audit and pin dependency versions
@@ -215,5 +228,5 @@ To verify the fixes:
 
 ---
 
-**Last Updated:** August 25, 2026
-**Status:** 3 critical/high issues fixed; 5+ medium/low issues pending
+**Last Updated:** October 16, 2026
+**Status:** 3 critical/high issues fixed + follow-up fixes; CSRF, rate limiting, account lockout, and CSP still pending

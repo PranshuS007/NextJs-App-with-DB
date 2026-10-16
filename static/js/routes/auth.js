@@ -29,7 +29,7 @@ async function bindForgotPassword() {
     if (message) message.textContent = "Preparing reset link...";
     try {
       const data = await postJson("/api/auth/forgot-password", formValues(form));
-      if (message) message.innerHTML = data.reset_url ? `${data.message} <a href="${data.reset_url}">Reset password</a>` : data.message;
+      if (message) message.textContent = data.message;
     } catch (error) {
       if (message) message.textContent = error.message;
     }

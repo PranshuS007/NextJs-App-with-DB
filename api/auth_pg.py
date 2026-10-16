@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from db import get_conn
+from config.settings import settings
 from email_service import queue_and_send
 
 SESSION_DAYS = 14
@@ -86,7 +87,7 @@ def require_user(request: Request):
     return user
 
 
-def set_session(response: Response, user_id: int):
+def set_session(request: Request, response: Response, user_id: int):
     token = secrets.token_urlsafe(32)
     expires_at = now_utc() + timedelta(days=SESSION_DAYS)
     with get_conn() as conn:
@@ -96,12 +97,19 @@ def set_session(response: Response, user_id: int):
                 (token, user_id, expires_at),
             )
         conn.commit()
+    # Sent over HTTPS the cookie is marked Secure; over plain HTTP (local dev
+    # or a TLS-terminating proxy) it must not be, or browsers will silently
+    # discard it and login/register appear broken. COOKIE_SECURE overrides.
+    if settings.cookie_secure is not None:
+        secure = settings.cookie_secure
+    else:
+        secure = request.url.scheme == "https"
     response.set_cookie(
         "still_session",
         token,
         max_age=SESSION_DAYS * 24 * 60 * 60,
         httponly=True,
-        secure=True,
+        secure=secure,
         samesite="lax",
     )
 
@@ -117,7 +125,7 @@ def clear_session(request: Request, response: Response):
 
 
 @router.post("/register")
-async def register(payload: AuthRequest, response: Response):
+async def register(payload: AuthRequest, request: Request, response: Response):
     email = payload.email.lower().strip()
     if len(payload.password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters.")
@@ -136,12 +144,12 @@ async def register(payload: AuthRequest, response: Response):
             raise HTTPException(status_code=400, detail="An account with this email already exists.") from exc
         raise
 
-    set_session(response, user["id"])
+    set_session(request, response, user["id"])
     return {"user": public_user(user)}
 
 
 @router.post("/login")
-async def login(payload: AuthRequest, response: Response):
+async def login(payload: AuthRequest, request: Request, response: Response):
     email = payload.email.lower().strip()
     with get_conn() as conn:
         with conn.cursor() as cur:
@@ -151,7 +159,7 @@ async def login(payload: AuthRequest, response: Response):
     if user is None or not verify_password(payload.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="Invalid email or password.")
 
-    set_session(response, user["id"])
+    set_session(request, response, user["id"])
     return {"user": public_user(user)}
 
 
